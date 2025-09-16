@@ -1,0 +1,11 @@
+run:
+  name: train-small
+trainer:
+  max_steps: 100
+model:
+  global_batch_size: 128
+  micro_batch_size: 8
+data:
+  num_workers: 4
+output:
+  dir: metrics

@@ -1,0 +1,11 @@
+run:
+  name: infer-small
+trainer:
+  max_steps: 200
+model:
+  global_batch_size: 256
+  micro_batch_size: 1
+data:
+  num_workers: 4
+output:
+  dir: metrics

@@ -1,0 +1,12 @@
+run:
+  name: demo-run
+trainer:
+  max_steps: 50
+model:
+  global_batch_size: 64
+  micro_batch_size: 8
+data:
+  num_workers: 4
+  source: local
+output:
+  dir: metrics
