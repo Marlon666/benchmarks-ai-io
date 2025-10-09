@@ -1,0 +1,4 @@
+run: { name: leb-flat }
+data: { root: ./data/flat, entries_per_dir: 5000, depth: 1 }
+benchmark: { concurrency: 16, page_size: 2000, warm_cache: false }
+output: { dir: metrics }

@@ -1,0 +1,12 @@
+run:
+  name: leb-default
+data:
+  root: ./data/emulated_tree
+  entries_per_dir: 2000
+  depth: 3
+benchmark:
+  concurrency: 8
+  page_size: 1000
+  warm_cache: false
+output:
+  dir: metrics

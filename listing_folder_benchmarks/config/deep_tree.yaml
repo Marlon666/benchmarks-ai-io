@@ -1,0 +1,4 @@
+run: { name: leb-deep }
+data: { root: ./data/deep, entries_per_dir: 400, depth: 5 }
+benchmark: { concurrency: 8, page_size: 200, warm_cache: false }
+output: { dir: metrics }
