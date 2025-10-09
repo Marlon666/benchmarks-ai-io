@@ -1,0 +1,17 @@
+run:
+  name: cpb-nvme-burst
+storage:
+  root: /tmp/checkpoint-stress
+  shard_count: 16
+  shard_size_mb: 64
+benchmark:
+  iterations: 5
+  concurrency: 8
+  mode: write-read
+  retention: 3
+  fsync: true
+  chunk_mb: 8
+  read_buffer_kb: 4096
+  cleanup_after: true
+output:
+  dir: metrics

@@ -1,0 +1,17 @@
+run:
+  name: cpb-read-test
+storage:
+  root: ./data/checkpoints
+  shard_count: 8
+  shard_size_mb: 16
+benchmark:
+  iterations: 3
+  concurrency: 6
+  mode: read
+  retention: 0
+  fsync: false
+  chunk_mb: 4
+  read_buffer_kb: 2048
+  cleanup_after: false
+output:
+  dir: metrics

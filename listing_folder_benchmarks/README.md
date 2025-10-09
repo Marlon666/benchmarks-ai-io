@@ -105,3 +105,49 @@ YAML examples live in `configs/`:
 - **Lower P95/P99** → fewer long-tail stalls → smoother step times and better GPU utilization.
 
 Together these reduce $ / token and energy per sample.
+
+---
+
+## Sample report format
+
+### Scenario overview
+| Run ID | Tree shape | Entries/dir | Depth | Concurrency | Page size | Cache state |
+| --- | --- | --- | --- | --- | --- | --- |
+| leb-flat-cold | Flat | 4096 | 2 | 16 threads | 2048 | Cold |
+| leb-flat-warm | Flat | 4096 | 2 | 16 threads | 2048 | Warm (metadata cache primed) |
+| leb-deep-cold | Deep | 512 | 6 | 32 threads | 256 | Cold |
+| leb-deep-prefetch | Deep | 512 | 6 | 32 threads | 256 | Cold + manifest prefetch |
+
+### Metric snapshot (synthetic)
+| Run ID | Entries/s | TTFB (s) | P95 list latency (ms) | P99 list latency (ms) | Request amplification | GPU idle reduction (proxy %) |
+| --- | --- | --- | --- | --- | --- | --- |
+| leb-flat-cold | 8,950 | 4.2 | 38 | 82 | 1.92 | 11 |
+| leb-flat-warm | 12,480 | 1.6 | 17 | 29 | 1.05 | 19 |
+| leb-deep-cold | 2,430 | 9.8 | 142 | 311 | 4.87 | 4 |
+| leb-deep-prefetch | 5,120 | 5.1 | 76 | 158 | 2.03 | 9 |
+
+### Chart sketches (replace with real figures)
+````text
+Entries/s (higher is better)
+leb-flat-warm       |█████████████████████████████████████████████ 12.5k
+leb-flat-cold       |███████████████████████ 8.9k
+leb-deep-prefetch   |███████████ 5.1k
+leb-deep-cold       |█████ 2.4k
+
+TTFB (lower is better)
+leb-flat-warm       |██ 1.6s
+leb-flat-cold       |████ 4.2s
+leb-deep-prefetch   |███████ 5.1s
+leb-deep-cold       |███████████ 9.8s
+
+Tail latency (P95 / ms)
+leb-flat-warm       |████ 17
+leb-flat-cold       |██████████ 38
+leb-deep-prefetch   |████████████████ 76
+leb-deep-cold       |██████████████████████████████ 142
+````
+
+### Reporting checklist
+- Attach `metrics/<run-id>/listing_summary.yaml` and `metadata.yaml`.
+- Include environment notes (cloud region, filesystem mount options, kernel version).
+- Document the command lines and config diffs in `EXPERIMENT_LOG.md`.

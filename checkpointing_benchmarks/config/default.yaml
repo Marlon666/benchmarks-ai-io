@@ -1,0 +1,17 @@
+run:
+  name: cpb-demo
+storage:
+  root: ./data/checkpoints
+  shard_count: 8
+  shard_size_mb: 16
+benchmark:
+  iterations: 3
+  concurrency: 4
+  mode: write-read
+  retention: 2
+  fsync: false
+  chunk_mb: 4
+  read_buffer_kb: 1024
+  cleanup_after: false
+output:
+  dir: metrics
