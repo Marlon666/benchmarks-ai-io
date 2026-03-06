@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "benchmarks-ai-io"
+version = "0.2.0"
+description = "Open, reproducible benchmarks for AI storage and data-path bottlenecks"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+dependencies = [
+    "PyYAML>=6.0",
+    "aiofiles>=24.1",
+]
+
+[project.optional-dependencies]
+plotting = ["matplotlib", "pandas"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21"]
+
+[tool.setuptools.packages.find]
+include = [
+    "benchmarks_common*",
+    "listing_folder_benchmarks*",
+    "serving_benchmarks*",
+    "checkpointing_benchmarks*",
+    "dataloader_benchmarks*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
