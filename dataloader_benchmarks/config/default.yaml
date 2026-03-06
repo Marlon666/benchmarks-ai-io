@@ -1,0 +1,16 @@
+run:
+  name: dl-default
+
+data:
+  root: ./data/dataloader
+
+benchmark:
+  strategy: sequential
+  epochs: 3
+  prefetch_depth: 4
+  read_buffer_kb: 256
+  batch_size: 32
+  compressed: false
+
+output:
+  dir: metrics
