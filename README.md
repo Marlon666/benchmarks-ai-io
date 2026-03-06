@@ -4,7 +4,7 @@ Open, reproducible benchmarks and practical recipes to surface storage and data-
 ## Project vision
 - Build a neutral, scriptable harness that emulates common AI workloads and isolates the storage layer.
 - Produce portable CSV/YAML outputs so teams can compare runs across clouds, filesystems, and hardware.
-- Provide “good, better, best” optimization playbooks that translate benchmark wins into model performance and $/token savings.
+- Provide "good, better, best" optimization playbooks that translate benchmark wins into model performance and $/token savings.
 
 ## How AI workloads stress storage
 Modern models mix bursty metadata traffic with sustained throughput requirements. The balance shifts depending on whether you are training or serving, creating different stress profiles for the I/O stack.
@@ -12,7 +12,8 @@ Modern models mix bursty metadata traffic with sustained throughput requirements
 ### Training profile
 - **Checkpointing & snapshots:** Periodic multi-GB writes (and reads for restarts) demand fast, durable storage; inconsistent latency leads to idle accelerators.
 - **Dataset enumeration:** Epoch resets or shuffle stages have to list and shard millions of files; metadata latency inflates time-to-first-batch.
-- **Streaming & prefetch:** Background workers pull data continuously; they rely on predictable bandwidth and low jitter to keep device queues full.
+- **Data loading & prefetch:** Background workers pull data continuously using sequential, random, or memory-mapped reads; they rely on predictable bandwidth and low jitter to keep device queues full.
+- **Streaming & shuffle:** Random-access reads during epoch shuffling can be orders of magnitude slower than sequential scans—a key bottleneck for large datasets.
 - **Gradient logging & artifacts:** Auxiliary outputs (metrics, tensor dumps) create write amplification that competes with primary data reads.
 
 ### Inference / bulk decoding profile
@@ -22,8 +23,8 @@ Modern models mix bursty metadata traffic with sustained throughput requirements
 
 ## Critical I/O behaviors to measure
 - **Listing & metadata fan-out:** Determines time-to-first-batch and controls the number of RPCs the filesystem or object store must service. Small directories vs. deep trees show different scaling characteristics.
-- **Checkpoint throughput & replay:** Drives how quickly training recovers from failures and whether mid-epoch checkpoints starve compute.
-- **Data loading & prefetch depth:** Captures the end-to-end impact of loaders, compression, shuffling, and caching on steady-state throughput.
+- **Checkpoint throughput & replay:** Drives how quickly training recovers from failures and whether mid-epoch checkpoints starve compute. Sync vs. async IO engines show different tail behavior.
+- **Data loading & prefetch depth:** Captures the end-to-end impact of sequential, random-access, memory-mapped, and prefetch-based read strategies on steady-state throughput.
 - **Intermediate artifact handling:** Evaluates how logs, embeddings, and temporary tensors interact with burst buffers or local SSD tiers.
 
 ## Framework and model considerations
@@ -41,35 +42,54 @@ Benchmarking these combinations reveals whether throttling stems from metadata, 
 The benchmarks in this repository let you validate how these features behave under your workload shapes, quantify tail behavior, and test tuning (prefetch, pagination, sharding) before touching production clusters.
 
 ## Benchmarks in this repository
-- **Listing Emulated Benchmark (LEB)** — located in `listing_folder_benchmarks/`. Focuses on metadata latency, pagination cost, and enumeration concurrency. Ideal for sizing manifest caches, comparing filesystem mounts, or validating new object-store regions.
-- **Serving Benchmarks** — located in `serving_benchmarks/`. Emulates batch inference workloads, measuring microbatch data-loader latency, tail behavior, and the knock-on effects on GPU utilization and cost.
-- **Checkpointing Benchmarks** — located in `checkpointing_benchmarks/`. Simulates shard-write/read cycles with tunable concurrency, fsync, and retention policies to expose throughput limits and tail latencies across storage tiers.
-- **Upcoming modules (roadmap)** — distributed shuffle loaders, streaming dataset replay, and mixed workload stressors that combine listing + checkpoint + streaming phases.
+- **Listing Emulated Benchmark (LEB)** — `listing_folder_benchmarks/`. Focuses on metadata latency via real `os.stat()` and `os.scandir()` calls, pagination cost, and enumeration concurrency. Ideal for sizing manifest caches, comparing filesystem mounts, or validating new object-store regions.
+- **Serving Benchmarks** — `serving_benchmarks/`. Measures real file-I/O data-loading latency for batch inference workloads, with configurable read buffers, auto-generated datasets, and tail behavior tracking.
+- **Checkpointing Benchmarks** — `checkpointing_benchmarks/`. Simulates shard-write/read cycles with tunable concurrency, fsync, retention policies, and configurable IO engines (sync or async via aiofiles).
+- **Dataloader Benchmarks** *(new)* — `dataloader_benchmarks/`. Emulates training data-loading pipelines with four read strategies: sequential, random (shuffled), memory-mapped (mmap), and prefetch (thread pool). Supports gzip-compressed datasets and tracks TTFB, per-sample tail latencies, and epoch throughput.
 
 Each module is designed to run on commodity hardware without GPUs, yet scales to GPU-backed clusters when you want to observe device utilization side-by-side.
 
 ## Getting started
-1. Clone the repo and create a Python environment (3.10+ recommended):
+1. Clone the repo and install in development mode (Python 3.10+):
    ```bash
    python -m venv .venv && source .venv/bin/activate
-   pip install -r listing_folder_benchmarks/requirements.txt
-   pip install -r serving_benchmarks/requirements.txt
+   pip install -e ".[dev]"
    ```
-2. Choose a benchmark:
-   - Listing: see `listing_folder_benchmarks/README.md` for configs such as `config/flat_tree.yaml`.
-   - Serving: see `serving_benchmarks/README.md` and associated scripts in `serving_benchmarks/scripts/`.
-3. Run locally or on a remote machine (GPU optional). All results land under `./metrics/<run-name>/`.
+2. Choose a benchmark and run it:
+   ```bash
+   # Listing — real metadata I/O with os.stat()
+   python -m listing_folder_benchmarks.src.run \
+     --run-name leb-demo --entries-per-dir 500 --depth 2
 
-Benchmarks emit structured outputs (CSV + YAML) that capture per-call timings, tail percentiles, throughput, configuration knobs, and environment metadata. Version these artifacts or feed them into dashboards to track regressions.
+   # Checkpointing — with async IO engine
+   python -m checkpointing_benchmarks.src.run \
+     --run-name cpb-demo --iterations 3 --io-engine async
+
+   # Serving — real file reads
+   python -m serving_benchmarks.src.train \
+     --run-name serve-demo --steps 50 --auto-generate true
+
+   # Dataloader — compare read strategies
+   python -m dataloader_benchmarks.src.run \
+     --run-name dl-demo --strategy prefetch --epochs 2
+   ```
+3. Results land under `./metrics/<run-name>/` as structured CSV + YAML.
+
+## Running tests
+```bash
+pytest tests/ -v
+```
 
 ## How this project helps you
 - **Validate storage tiers before deployment:** Measure listing latency on S3 vs. FSx, or compare Azure Blob tiers with and without hierarchical namespaces.
 - **Tune application knobs safely:** Experiment with PyTorch DataLoader workers, tf.data pipeline fusion, or checkpoint intervals and observe real latency/throughput changes.
+- **Compare IO engines:** Benchmark sync vs. async checkpoint write/read to quantify the impact of aiofiles on your storage path.
+- **Evaluate read strategies:** Sequential vs. random vs. mmap vs. prefetch — find the right pattern for your dataset shape and storage tier.
 - **Quantify ROI of provider features:** Demonstrate the impact of AWS S3 Express, GCS metadata caching, or Azure Premium SSD upgrades on time-to-first-batch and $/token.
 - **Share reproducible results:** Use the portable outputs and configuration files to publish, compare, or reproduce runs across teams and vendors.
 
 ## Roadmap & contributions
-- Near-term additions: checkpoint churn simulator, streaming dataloader stress tests, and mixed workloads that model full training steps.
+- Near-term additions: distributed multi-node benchmarks, cloud object-store backends (S3/GCS/AzBlob), and mixed workloads that combine listing + checkpoint + streaming phases.
 - Contributions are welcome—open an issue with the workload you want to emulate or submit a PR with a new module/config.
 - All code is released under the `LICENSE` file in this repo; please review before contributing.
 
