@@ -1,5 +1,5 @@
-PyYAML
+PyYAML>=6.0,<7.0
 # Optional (uncomment and pin in your environment as needed):
-# torch
-# numpy
-# matplotlib
+# torch>=2.0,<3.0
+# numpy>=1.24,<2.0
+# matplotlib>=3.7,<4.0

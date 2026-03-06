@@ -1,4 +1,4 @@
-PyYAML
+PyYAML>=6.0,<7.0
 # Optional (local analysis / plotting):
-# pandas
-# matplotlib
+# pandas>=2.0,<3.0
+# matplotlib>=3.7,<4.0
