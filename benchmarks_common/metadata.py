@@ -19,7 +19,8 @@ class RunMetadata:
     def __post_init__(self) -> None:
         if not self.timestamp_utc:
             self.timestamp_utc = (
-                _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+                _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+                .replace("+00:00", "Z")
             )
         if not self.host:
             self.host = {
