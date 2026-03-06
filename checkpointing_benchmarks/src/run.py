@@ -1,49 +1,14 @@
 import argparse
 import os
-import statistics as stats
 from typing import Any, Dict, List
 
-try:
-    import yaml  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - optional dependency
-    yaml = None  # type: ignore
+from benchmarks_common.cli import load_yaml_config, parse_bool
+from benchmarks_common.metadata import build_metadata
+from benchmarks_common.outputs import write_csv, write_yaml
+from benchmarks_common.stats import percentile, safe_mean, safe_median
 
 from .checkpoint_runner import (BenchmarkParams, CheckpointingBenchmark,
                                 IterationRecord, ShardRecord)
-from .outputs import write_csv, write_yaml
-from .schema.run_metadata import default_metadata
-
-
-def _parse_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    if isinstance(value, (int, float)):
-        return bool(value)
-    value_str = str(value).strip().lower()
-    return value_str in {"1", "true", "yes", "y", "on"}
-
-
-def _percentile(values: List[float], pct: float) -> float:
-    if not values:
-        return 0.0
-    values = sorted(values)
-    if pct <= 0:
-        return values[0]
-    if pct >= 1:
-        return values[-1]
-    idx = int(round(pct * (len(values) - 1)))
-    return values[idx]
-
-
-def _load_config(path: str) -> Dict[str, Any]:
-    if yaml is None:
-        raise RuntimeError(
-            "PyYAML is required to load configuration files. "
-            "Install it with 'pip install PyYAML' or omit --config.")
-    with open(path, "r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh) or {}
 
 
 def main() -> None:
@@ -61,11 +26,14 @@ def main() -> None:
     parser.add_argument("--chunk-mb", type=float, default=4.0)
     parser.add_argument("--read-buffer-kb", type=int, default=1024)
     parser.add_argument("--cleanup-after", type=str, default="false")
+    parser.add_argument("--io-engine", type=str, default="sync",
+                        choices=["sync", "async"],
+                        help="IO engine: sync (default) or async (aiofiles)")
     parser.add_argument("--outdir", type=str, default="metrics")
     args = parser.parse_args()
 
     if args.config:
-        cfg = _load_config(args.config)
+        cfg = load_yaml_config(args.config)
         args.run_name = cfg.get("run", {}).get("name", args.run_name)
         args.storage_root = cfg.get("storage", {}).get("root", args.storage_root)
         args.shard_count = cfg.get("storage",
@@ -85,6 +53,8 @@ def main() -> None:
                                       {}).get("read_buffer_kb", args.read_buffer_kb)
         args.cleanup_after = cfg.get("benchmark",
                                      {}).get("cleanup_after", args.cleanup_after)
+        args.io_engine = cfg.get("benchmark",
+                                 {}).get("io_engine", args.io_engine)
         args.outdir = cfg.get("output", {}).get("dir", args.outdir)
 
     params = BenchmarkParams(
@@ -94,12 +64,13 @@ def main() -> None:
         shard_count=max(1, int(args.shard_count)),
         shard_size_mb=float(args.shard_size_mb),
         concurrency=max(1, int(args.concurrency)),
-        fsync=_parse_bool(args.fsync),
+        fsync=parse_bool(args.fsync),
         mode=str(args.mode),
         retention=max(0, int(args.retention)),
         chunk_mb=max(0.1, float(args.chunk_mb)),
         read_buffer_kb=max(1, int(args.read_buffer_kb)),
-        cleanup_after=_parse_bool(args.cleanup_after),
+        cleanup_after=parse_bool(args.cleanup_after),
+        io_engine=str(args.io_engine),
     )
 
     benchmark = CheckpointingBenchmark(params)
@@ -119,19 +90,25 @@ def main() -> None:
 
     summary = _build_summary(iteration_records, shard_records, params)
     write_yaml(summary_path, summary)
-    write_yaml(meta_path, default_metadata(args.run_name, {
-        "storage_root": args.storage_root,
-        "iterations": params.iterations,
-        "shard_count": params.shard_count,
-        "shard_size_mb": params.shard_size_mb,
-        "concurrency": params.concurrency,
-        "mode": params.mode,
-        "retention": params.retention,
-        "fsync": params.fsync,
-        "chunk_mb": params.chunk_mb,
-        "read_buffer_kb": params.read_buffer_kb,
-        "cleanup_after": params.cleanup_after,
-    }, summary))
+    write_yaml(meta_path, build_metadata(
+        run_name=args.run_name,
+        benchmark="checkpointing",
+        parameters={
+            "storage_root": args.storage_root,
+            "iterations": params.iterations,
+            "shard_count": params.shard_count,
+            "shard_size_mb": params.shard_size_mb,
+            "concurrency": params.concurrency,
+            "mode": params.mode,
+            "retention": params.retention,
+            "fsync": params.fsync,
+            "chunk_mb": params.chunk_mb,
+            "read_buffer_kb": params.read_buffer_kb,
+            "cleanup_after": params.cleanup_after,
+            "io_engine": params.io_engine,
+        },
+        summary=summary,
+    ))
 
 
 def _to_shard_rows(records: List[ShardRecord]) -> List[List[Any]]:
@@ -191,6 +168,7 @@ def _build_summary(iteration_records: List[IterationRecord],
 
     summary: Dict[str, Any] = {
         "mode": params.mode,
+        "io_engine": params.io_engine,
         "iterations_scheduled": params.iterations,
         "write_iterations": len(write_iters),
         "read_iterations": len(read_iters),
@@ -206,11 +184,11 @@ def _build_summary(iteration_records: List[IterationRecord],
         throughputs = [it.throughput_mb_s for it in write_iters]
         summary.update({
             "total_bytes_written": int(sum(it.total_bytes for it in write_iters)),
-            "write_p50_sec": round(stats.median(durations), 6),
-            "write_p95_sec": round(_percentile(durations, 0.95), 6),
-            "write_p99_sec": round(_percentile(durations, 0.99), 6),
+            "write_p50_sec": round(safe_median(durations), 6),
+            "write_p95_sec": round(percentile(durations, 0.95), 6),
+            "write_p99_sec": round(percentile(durations, 0.99), 6),
             "write_avg_throughput_mb_s":
-            round(stats.mean(throughputs), 2) if throughputs else 0.0,
+            round(safe_mean(throughputs), 2),
         })
     else:
         summary.update({
@@ -226,11 +204,11 @@ def _build_summary(iteration_records: List[IterationRecord],
         throughputs = [it.throughput_mb_s for it in read_iters]
         summary.update({
             "total_bytes_read": int(sum(it.total_bytes for it in read_iters)),
-            "read_p50_sec": round(stats.median(durations), 6),
-            "read_p95_sec": round(_percentile(durations, 0.95), 6),
-            "read_p99_sec": round(_percentile(durations, 0.99), 6),
+            "read_p50_sec": round(safe_median(durations), 6),
+            "read_p95_sec": round(percentile(durations, 0.95), 6),
+            "read_p99_sec": round(percentile(durations, 0.99), 6),
             "read_avg_throughput_mb_s":
-            round(stats.mean(throughputs), 2) if throughputs else 0.0,
+            round(safe_mean(throughputs), 2),
         })
     else:
         summary.update({
@@ -244,8 +222,8 @@ def _build_summary(iteration_records: List[IterationRecord],
     if write_shards:
         shard_durations = [s.duration_sec for s in write_shards]
         summary.update({
-            "write_shard_p95_sec": round(_percentile(shard_durations, 0.95), 6),
-            "write_shard_p99_sec": round(_percentile(shard_durations, 0.99), 6),
+            "write_shard_p95_sec": round(percentile(shard_durations, 0.95), 6),
+            "write_shard_p99_sec": round(percentile(shard_durations, 0.99), 6),
         })
     else:
         summary.update({"write_shard_p95_sec": 0.0, "write_shard_p99_sec": 0.0})
@@ -253,8 +231,8 @@ def _build_summary(iteration_records: List[IterationRecord],
     if read_shards:
         shard_durations = [s.duration_sec for s in read_shards]
         summary.update({
-            "read_shard_p95_sec": round(_percentile(shard_durations, 0.95), 6),
-            "read_shard_p99_sec": round(_percentile(shard_durations, 0.99), 6),
+            "read_shard_p95_sec": round(percentile(shard_durations, 0.95), 6),
+            "read_shard_p99_sec": round(percentile(shard_durations, 0.99), 6),
         })
     else:
         summary.update({"read_shard_p95_sec": 0.0, "read_shard_p99_sec": 0.0})
